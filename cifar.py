@@ -5,6 +5,7 @@ import os
 import shutil
 import time
 import random
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -15,15 +16,16 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import resnet
+import calculate_optimal_alpha
 
 from utils import Logger, AverageMeter, accuracy, mkdir_p, savefig
-from utils.progress.bar import Bar
+from progress.bar import Bar
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 # Optimization options
-parser.add_argument('--epochs', default=50, type=int, metavar='N',
+parser.add_argument('--epochs', default=20, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -51,7 +53,7 @@ parser.add_argument('--manualSeed', type=int, help='manual seed')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
 #Device options
-parser.add_argument('--gpu-id', default='2', type=str,
+parser.add_argument('--gpu-id', default='4', type=str,
                     help='id(s) for CUDA_VISIBLE_DEVICES')
 
 args = parser.parse_args()
@@ -71,9 +73,12 @@ if use_cuda:
     torch.cuda.manual_seed_all(args.manualSeed)
 
 best_acc = 0  # best test accuracy
+record = np.zeros([1, 1], dtype=np.float32)
+
 
 def main():
     global best_acc
+    #global record
     start_epoch = args.start_epoch  # start from epoch 0 or last checkpoint epoch
 
     if not os.path.isdir(args.checkpoint):
@@ -109,7 +114,7 @@ def main():
     print("==> Creating Model ResNet")
     model = resnet.ResNet()
     print("==> Create Successfully! Model Architecture:" )
-    print(model)
+    # print(model)
 
     model = torch.nn.DataParallel(model).cuda()
     cudnn.benchmark = True
@@ -143,6 +148,7 @@ def main():
 
     # Train and val
     for epoch in range(start_epoch, args.epochs):
+        resnet.RecordActivation = False
         adjust_learning_rate(optimizer, epoch)
 
         print('\nEpoch: [%d | %d] LR: %f' % (epoch + 1, args.epochs, state['lr']))
@@ -164,6 +170,8 @@ def main():
                 'optimizer' : optimizer.state_dict(),
             }, is_best, checkpoint=args.checkpoint)
 
+        calculate_optimal_alpha.cal_quant()
+
     logger.close()
     logger.plot()
     savefig(os.path.join(args.checkpoint, 'log.eps'))
@@ -172,8 +180,6 @@ def main():
     print(best_acc)
 
 def train(trainloader, model, criterion, optimizer, epoch, use_cuda):
-    # switch to train mode
-    model.train()
 
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -184,6 +190,11 @@ def train(trainloader, model, criterion, optimizer, epoch, use_cuda):
 
     bar = Bar('Processing', max=len(trainloader))
     for batch_idx, (inputs, targets) in enumerate(trainloader):
+        if batch_idx == len(trainloader) - 1:
+            resnet.RecordActivation = True
+        # switch to train mode
+        model.train()
+
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -193,7 +204,9 @@ def train(trainloader, model, criterion, optimizer, epoch, use_cuda):
 
         # compute output
         outputs = model(inputs)
-        loss = criterion(outputs, targets)
+
+        loss = criterion(outputs, targets) + resnet.loss_MSE
+        print("In method train:  loss_MSE = " + str(resnet.loss_MSE) + " total loss = " + str(loss))
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(outputs.data, targets.data, topk=(1, 5))
@@ -224,6 +237,7 @@ def train(trainloader, model, criterion, optimizer, epoch, use_cuda):
                     )
         bar.next()
     bar.finish()
+    resnet.RecordActivation = False
     return (losses.avg, top1.avg)
 
 def test(testloader, model, criterion, epoch, use_cuda):
@@ -254,9 +268,9 @@ def test(testloader, model, criterion, epoch, use_cuda):
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(outputs.data, targets.data, topk=(1, 5))
-        losses.update(loss.data[0], inputs.size(0))
-        top1.update(prec1[0], inputs.size(0))
-        top5.update(prec5[0], inputs.size(0))
+        losses.update(loss.item(), inputs.size(0))
+        top1.update(prec1.item(), inputs.size(0))
+        top5.update(prec5.item(), inputs.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
