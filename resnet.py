@@ -2,14 +2,24 @@ from __future__ import absolute_import
 import numpy as np
 import torch
 import torch.nn as nn
+import cifar
+import calculate_optimal_alpha
 
-Block_Num = 8
+Block_Num = 2
 # The range of baseline quantization
 maximum = 2 ** 8 - 1
 bit_num = 8
-Rounding = False
+Rounding = True#False
 Print_Feature = False
+X_round_regu = torch.zeros([1, 1], dtype=torch.float32)
+loss_MSE = 0.0
+RecordActivation = False
 
+names = []
+
+record = {'conv0':[], 'conv1_0_2':[], 'conv1_1_1':[], 'conv1_1_2':[],
+          'conv2_0_1':[], 'conv2_0_2':[], 'conv2_1_1':[], 'conv2_1_2':[],
+          'conv3_0_1':[], 'conv3_0_2':[], 'conv3_1_1':[], 'conv3_1_2':[]}
 
 def convert_x_1(name, tensor_x):
     """
@@ -18,29 +28,25 @@ def convert_x_1(name, tensor_x):
     :param tensor_x: the feature
     :return: none
     """
-    f0 = open('resnet_log.txt', 'a')   # Record print process, should use mode 'a'
-    f0.write(name + ": " + str(tensor_x.shape) + '\n')
-    f0.close()
-    f = open(name + '.txt', 'a')   # should use mode 'a'
+    global record
+    record[name] = []  # clear the record list
     for i in range(tensor_x.shape[0]):
-        for j in range(tensor_x.shape[3]):
-            v_2d = tensor_x[i, :, :, j]
+        for j in range(tensor_x.shape[1]):
+            v_2d = tensor_x[i, j, :, :]
+            #print(v_2d.shape)
             w = v_2d.shape[0]
             h = v_2d.shape[1]
             for Ii in range(w):
                 for Ji in range(h):
-                    strNum = str(v_2d[Ii, Ji])
-                    left = strNum.find('(')
-                    right = strNum.find(',')
-                    num = strNum[left + 1:right]
-                    f.write(num + '\n')
-                    pass
-                    pass
-    f.close()
+                    num = v_2d[Ii, Ji].item()
+                    record[name].append(num)
+    print("Finshed Recording Activation output from Layer:" + name)
     return
+    #strNum = v_2d[Ii, Ji].item()
+    #np.append(record, [strNum])
 
 
-def bit_bottleneck_layer(x, name, rounding=True, print_feature=True):
+def bit_bottleneck_layer(x, name, rounding=False, Print_Act=RecordActivation):
     '''
     This is the Bit Bottleneck layer.
     :param x: input tensor
@@ -49,6 +55,7 @@ def bit_bottleneck_layer(x, name, rounding=True, print_feature=True):
     :param print_feature: if ture, it will print the feature.
     :return: output
     '''
+    global RecordActivation
     if rounding:
         rank = x.ndim
         assert rank is not None
@@ -61,8 +68,9 @@ def bit_bottleneck_layer(x, name, rounding=True, print_feature=True):
         t = torch.zeros_like(x)
         x_normal = x * 0.5 + t.uniform_(-0.5 / maximum, 0.5 / maximum)
 
+
         # Print the activation
-        if print_feature:
+        if RecordActivation:
             x_print = x_normal * maximum
             convert_x_1(name, x_print)
 
@@ -95,7 +103,34 @@ def bit_bottleneck_layer(x, name, rounding=True, print_feature=True):
         elif name == 'conv1_1_2':
             alpha = alpha_array[3].reshape(bit_num, 1)
             init_beta = np.multiply(origin_beta, alpha)
-        elif name == 'conv1_2_1':
+        elif name == 'conv2_0_1':
+            alpha = alpha_array[4].reshape(bit_num, 1)
+            init_beta = np.multiply(origin_beta, alpha)
+        elif name == 'conv2_0_2':
+            alpha = alpha_array[5].reshape(bit_num, 1)
+            init_beta = np.multiply(origin_beta, alpha)
+        elif name == 'conv2_1_1':
+            alpha = alpha_array[6].reshape(bit_num, 1)
+            init_beta = np.multiply(origin_beta, alpha)
+        elif name == 'conv2_1_2':
+            alpha = alpha_array[7].reshape(bit_num, 1)
+            init_beta = np.multiply(origin_beta, alpha)
+        elif name == 'conv3_0_1':
+            alpha = alpha_array[8].reshape(bit_num, 1)
+            init_beta = np.multiply(origin_beta, alpha)
+        elif name == 'conv3_0_2':
+            alpha = alpha_array[9].reshape(bit_num, 1)
+            init_beta = np.multiply(origin_beta, alpha)
+        elif name == 'conv3_1_1':
+            alpha = alpha_array[10].reshape(bit_num, 1)
+            init_beta = np.multiply(origin_beta, alpha)
+        elif name == 'conv3_1_2':
+            alpha = alpha_array[11].reshape(bit_num, 1)
+            init_beta = np.multiply(origin_beta, alpha)
+        else:
+            print('There is something wrong !')
+
+        '''elif name == 'conv1_2_1':
             alpha = alpha_array[4].reshape(bit_num, 1)
             init_beta = np.multiply(origin_beta, alpha)
         elif name == 'conv1_2_2':
@@ -226,10 +261,10 @@ def bit_bottleneck_layer(x, name, rounding=True, print_feature=True):
             init_beta = np.multiply(origin_beta, alpha)
         elif name == 'conv3_7_2':
             alpha = alpha_array[47].reshape(bit_num, 1)
-            init_beta = np.multiply(origin_beta, alpha)
-        else:
+            init_beta = np.multiply(origin_beta, alpha)'''
+        '''else:
             print('There is something wrong !')
-
+'''
         init_beta = torch.reshape(torch.from_numpy(init_beta), shape=[bit_num, 1])
 
         beta_back = torch.ones(size=[bit_num, 1], dtype=torch.float32)
@@ -243,6 +278,11 @@ def bit_bottleneck_layer(x, name, rounding=True, print_feature=True):
         x = x / maxx
         t = torch.zeros_like(x)
         x_normal = x * 0.5 + t.uniform_(-0.5 / maximum, 0.5 / maximum)
+
+        # Print the activation
+        if RecordActivation:
+            x_print = x_normal * maximum
+            convert_x_1(name, x_print)
 
         round_back = x_normal * maximum
         round_infer = torch.round(x_normal * maximum)
@@ -305,6 +345,7 @@ def bit_bottleneck_layer(x, name, rounding=True, print_feature=True):
 
         y_recov_back = torch.div(torch.matmul(y_stack.cuda().float(), beta_back.cuda().float()), float(bit_num))
         y_output = y_recov_back + (y_recov - y_recov_back).detach()
+        # print("y_output" + str(y_output))
 
         y_output = torch.reshape(y_output, shape=y_shape)
         y_output = torch.mul(y_output, y_sign)
@@ -313,6 +354,8 @@ def bit_bottleneck_layer(x, name, rounding=True, print_feature=True):
         output = torch.clamp(output, 0.0, 1.0)
         output = output - 0.5
         output = 2 * maxx * output
+
+        # print("output" + str(output))
 
     return output
 
@@ -351,6 +394,8 @@ class FirstBlock(nn.Module):
         X = self.relu1(X)
         # Add shortcut
         X = X + X_shortcut
+
+
         return X
 
 
@@ -443,6 +488,8 @@ class ResNet(nn.Module):
         self.output = nn.Linear(64, 10)
 
     def forward(self, input):
+        global X_round_regu
+        global loss_MSE
         print("--ResNetModel--forward--input.shape={}".format(input.shape))
         X = self.conv(input)
         X = self.bn(X)
@@ -454,6 +501,23 @@ class ResNet(nn.Module):
         X = self.fc(X)
         X = X.mean(dim=-1).mean(dim=-1)
         X = self.output(X)
+
+        # calculate the error of rounding quant
+        t = torch.full(X.shape, 2.0).cuda()
+        x_sign = torch.sign(X)
+        x_abs = torch.mul(x_sign, X)
+        '''print("x_abs:")
+        print(x_abs)
+        print("log2:")
+        print(torch.log2(x_abs).floor())'''
+        X_round_regu = t ** torch.log2(x_abs).floor()
+        X_round_regu = torch.mul(X_round_regu, x_sign)
+        '''print("X_round_regu:")
+        print(X_round_regu)'''
+        loss_mse = torch.nn.MSELoss()
+        loss_MSE = loss_mse(t.float(), X_round_regu.float())
+        '''print("loss_MSE:" + str(loss_MSE))'''
+
         return X
 
     def _make_block(self, blocknum, in_channels, filter_num, blocks, stride=1, first_block=False):
