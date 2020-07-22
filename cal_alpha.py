@@ -28,7 +28,7 @@ def cal_quant():
     max_range = 20  # the maximal search range of \lambda
     qt = 8  # the number of bits of baseline quantization
     maximum = 2. ** qt - 1
-    threshold_of_psnr_loss = 20
+    threshold_of_psnr_loss = 40
     threshold_of_psnr = 58.889 - threshold_of_psnr_loss
 
     i = 0.0
@@ -191,19 +191,19 @@ def cal_quant():
         # when reaching the smallest PSNR at the beginning or the bit number can't be compreseed
         if i == 0.001 or bit_num_zero == qt:
             best_alpha = 1e-5
-            print(names[t] + ' alpha = ', best_alpha)
-            print('The minimal alpha is large.')
+            print(names[t] + ' lambda = ', best_alpha)
+            print('The minimal lambda is large.')
 
         # When the minimal search range isn't small enough.
         elif i_3 <= 0.001 + 1e-5:
             best_alpha = 0.001
-            print('alpha = ', best_alpha)
+            print('lambda = ', best_alpha)
         # When the maximal search range isn't large enough.
         elif i_b == max_range:
             best_alpha = max_range
         else:
             best_alpha = i_3 + 0.001
-            print('alpha = ', best_alpha)
+            print('lambda = ', best_alpha)
 
         # Obtain the final vector \alpha
         model = Lasso(alpha=best_alpha, positive=True, max_iter=1000, random_state=0)  # 调节alpha可以实现对拟合的程度
