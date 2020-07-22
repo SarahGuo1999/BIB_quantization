@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 # Optimization options
-parser.add_argument('--epochs', default=20, type=int, metavar='N',
+parser.add_argument('--epochs', default=50, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -36,7 +36,7 @@ parser.add_argument('--test-batch', default=100, type=int, metavar='N',
 parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--schedule', type=int, nargs='+', default=[2, 4],
-                        help='Decrease learning rate at these epochs.')
+                    help='Decrease learning rate at these epochs.')
 parser.add_argument('--gamma', type=float, default=0.1, help='LR is multiplied by gamma on schedule.')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -52,9 +52,13 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
 parser.add_argument('--manualSeed', type=int, help='manual seed')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
-#Device options
+# Device options
 parser.add_argument('--gpu-id', default='4', type=str,
                     help='id(s) for CUDA_VISIBLE_DEVICES')
+
+# training options
+parser.add_argument('--fixbit', default=False, type=bool,
+                    help='if fix bit number')
 
 args = parser.parse_args()
 state = {k: v for k, v in args._get_kwargs()}
@@ -78,13 +82,11 @@ record = np.zeros([1, 1], dtype=np.float32)
 
 def main():
     global best_acc
-    #global record
+    # global record
     start_epoch = args.start_epoch  # start from epoch 0 or last checkpoint epoch
 
     if not os.path.isdir(args.checkpoint):
         mkdir_p(args.checkpoint)
-
-
 
     # Data
     print('===> Preparing dataset cifar10...')
@@ -103,7 +105,6 @@ def main():
     dataloader = datasets.CIFAR10
     num_classes = 10
 
-
     trainset = dataloader(root='./data', train=True, download=True, transform=transform_train)
     trainloader = data.DataLoader(trainset, batch_size=args.train_batch, shuffle=True, num_workers=args.workers)
 
@@ -113,12 +114,17 @@ def main():
     # Model
     print("==> Creating Model ResNet")
     model = resnet.ResNet()
-    print("==> Create Successfully! Model Architecture:" )
+    print("==> Create Successfully!")
     # print(model)
+
+    if not args.fixbit:
+        print("    Train both model and bitwise parameters...")
+    else:
+        print("    Train model with trained fixed bit number and parameters...")
 
     model = torch.nn.DataParallel(model).cuda()
     cudnn.benchmark = True
-    print('    Total params: %.2fM' % (sum(p.numel() for p in model.parameters())/1000000.0))
+    print('    Total params: %.2fM' % (sum(p.numel() for p in model.parameters()) / 1000000.0))
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
@@ -139,7 +145,6 @@ def main():
         logger = Logger(os.path.join(args.checkpoint, 'log.txt'), title=title)
         logger.set_names(['Learning Rate', 'Train Loss', 'Valid Loss', 'Train Acc.', 'Valid Acc.'])
 
-
     if args.evaluate:
         print('\nEvaluation only')
         test_loss, test_acc = test(testloader, model, criterion, start_epoch, use_cuda)
@@ -149,6 +154,13 @@ def main():
     # Train and val
     for epoch in range(start_epoch, args.epochs):
         resnet.RecordActivation = False
+        if not args.fixbit:
+            if epoch == start_epoch:
+                resnet.FirstEpoch = True
+            else:
+                resnet.FirstEpoch = False
+        else:
+            resnet.FirstEpoch = False
         adjust_learning_rate(optimizer, epoch)
 
         print('\nEpoch: [%d | %d] LR: %f' % (epoch + 1, args.epochs, state['lr']))
@@ -163,14 +175,15 @@ def main():
         is_best = test_acc > best_acc
         best_acc = max(test_acc, best_acc)
         save_checkpoint({
-                'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
-                'acc': test_acc,
-                'best_acc': best_acc,
-                'optimizer' : optimizer.state_dict(),
-            }, is_best, checkpoint=args.checkpoint)
+            'epoch': epoch + 1,
+            'state_dict': model.state_dict(),
+            'acc': test_acc,
+            'best_acc': best_acc,
+            'optimizer': optimizer.state_dict(),
+        }, is_best, checkpoint=args.checkpoint)
 
-        calculate_optimal_alpha.cal_quant()
+        if not args.fixbit:
+            calculate_optimal_alpha.cal_quant()
 
     logger.close()
     logger.plot()
@@ -179,8 +192,8 @@ def main():
     print('Best acc:')
     print(best_acc)
 
-def train(trainloader, model, criterion, optimizer, epoch, use_cuda):
 
+def train(trainloader, model, criterion, optimizer, epoch, use_cuda):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -191,7 +204,8 @@ def train(trainloader, model, criterion, optimizer, epoch, use_cuda):
     bar = Bar('Processing', max=len(trainloader))
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         if batch_idx == len(trainloader) - 1:
-            resnet.RecordActivation = True
+            if not args.fixbit:
+                resnet.RecordActivation = True
         # switch to train mode
         model.train()
 
@@ -224,21 +238,22 @@ def train(trainloader, model, criterion, optimizer, epoch, use_cuda):
         end = time.time()
 
         # plot progress
-        bar.suffix  = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
-                    batch=batch_idx + 1,
-                    size=len(trainloader),
-                    data=data_time.avg,
-                    bt=batch_time.avg,
-                    total=bar.elapsed_td,
-                    eta=bar.eta_td,
-                    loss=losses.avg,
-                    top1=top1.avg,
-                    top5=top5.avg,
-                    )
+        bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+            batch=batch_idx + 1,
+            size=len(trainloader),
+            data=data_time.avg,
+            bt=batch_time.avg,
+            total=bar.elapsed_td,
+            eta=bar.eta_td,
+            loss=losses.avg,
+            top1=top1.avg,
+            top5=top5.avg,
+        )
         bar.next()
     bar.finish()
     resnet.RecordActivation = False
     return (losses.avg, top1.avg)
+
 
 def test(testloader, model, criterion, epoch, use_cuda):
     global best_acc
@@ -277,20 +292,21 @@ def test(testloader, model, criterion, epoch, use_cuda):
         end = time.time()
 
         # plot progress
-        bar.suffix  = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
-                    batch=batch_idx + 1,
-                    size=len(testloader),
-                    data=data_time.avg,
-                    bt=batch_time.avg,
-                    total=bar.elapsed_td,
-                    eta=bar.eta_td,
-                    loss=losses.avg,
-                    top1=top1.avg,
-                    top5=top5.avg,
-                    )
+        bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+            batch=batch_idx + 1,
+            size=len(testloader),
+            data=data_time.avg,
+            bt=batch_time.avg,
+            total=bar.elapsed_td,
+            eta=bar.eta_td,
+            loss=losses.avg,
+            top1=top1.avg,
+            top5=top5.avg,
+        )
         bar.next()
     bar.finish()
     return (losses.avg, top1.avg)
+
 
 def save_checkpoint(state, is_best, checkpoint='checkpoint', filename='checkpoint.pth.tar'):
     filepath = os.path.join(checkpoint, filename)
@@ -298,12 +314,14 @@ def save_checkpoint(state, is_best, checkpoint='checkpoint', filename='checkpoin
     if is_best:
         shutil.copyfile(filepath, os.path.join(checkpoint, 'model_best.pth.tar'))
 
+
 def adjust_learning_rate(optimizer, epoch):
     global state
     if epoch in args.schedule:
         state['lr'] *= args.gamma
         for param_group in optimizer.param_groups:
             param_group['lr'] = state['lr']
+
 
 if __name__ == '__main__':
     main()
