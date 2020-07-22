@@ -28,8 +28,8 @@ def cal_quant():
     max_range = 20  # the maximal search range of \lambda
     qt = 8  # the number of bits of baseline quantization
     maximum = 2. ** qt - 1
-    threshold_of_psnr_loss = 40
-    threshold_of_psnr = 58.889 - threshold_of_psnr_loss
+    threshold_of_psnr_loss = 30.0
+    threshold_of_psnr = 59.0 - threshold_of_psnr_loss
 
     i = 0.0
     i_p2 = 0.0
@@ -37,7 +37,9 @@ def cal_quant():
 
     alpha_array = np.zeros([layer_num, 8], dtype=np.float32)
 
-    print("Start Calculating Bitwise Quanting Parameters:")
+    print("Start Calculating Bitwise Quanting Parameters...")
+    print("The Threshold of PSNR Loss:" + str(threshold_of_psnr_loss))
+    print("The Threshold of PSNR:" + str(threshold_of_psnr))
     print("Checking number of activation in each layer:")
     for s in range(0, layer_num):
         print("    Activation number of layer" + names[s] + " is " + str(len(resnet.record[names[s]])))
@@ -201,6 +203,7 @@ def cal_quant():
         # When the maximal search range isn't large enough.
         elif i_b == max_range:
             best_alpha = max_range
+            print('lambda = ', best_alpha)
         else:
             best_alpha = i_3 + 0.001
             print('lambda = ', best_alpha)
@@ -216,7 +219,6 @@ def cal_quant():
         MSE = np.mean((data_recov / 1.0 - data_abs / 1.0) ** 2)
         PSNR = 10 * math.log10(maximum ** 2 / MSE)
         print('The PSNR :', PSNR)
-        print('\n')
         print('\n')
 
     # Save the alpha of each layer as a .npz file.
