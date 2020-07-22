@@ -9,7 +9,7 @@ Block_Num = 2
 # The range of baseline quantization
 maximum = 2 ** 8 - 1
 bit_num = 8
-Rounding = True#False
+FirstEpoch = True
 Print_Feature = False
 X_round_regu = torch.zeros([1, 1], dtype=torch.float32)
 loss_MSE = 0.0
@@ -46,17 +46,19 @@ def convert_x_1(name, tensor_x):
     #np.append(record, [strNum])
 
 
-def bit_bottleneck_layer(x, name, rounding=False, Print_Act=RecordActivation):
+def bit_bottleneck_layer(x, name, firstepoch=FirstEpoch, Print_Act=RecordActivation):
     '''
     This is the Bit Bottleneck layer.
     :param x: input tensor
     :param name:  the name
-    :param rounding:  if ture, Bit Bottleneck only quantize the feature without compression with method of DoReFa-Net, or it will compress feature as well using the alpha vector we calculated
+    :param firstepoch:  if ture, Bit Bottleneck only quantize the feature without compression with method of DoReFa-Net, or it will compress feature as well using the alpha vector we calculated
     :param print_feature: if ture, it will print the feature.
     :return: output
     '''
     global RecordActivation
-    if rounding:
+    global FirstEpoch
+    if FirstEpoch:
+        # print("Training without BIB in first epoch....")
         rank = x.ndim
         assert rank is not None
 
@@ -85,6 +87,7 @@ def bit_bottleneck_layer(x, name, rounding=False, Print_Act=RecordActivation):
         output = y_round * maxx * 2
 
     else:
+        # print("Training with BIB layer...")
         origin_beta = np.ones(shape=(bit_num, 1), dtype=np.float32)
         init_beta = origin_beta
 
