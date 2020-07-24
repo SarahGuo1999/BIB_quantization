@@ -9,8 +9,8 @@ Block_Num = 2
 # The range of baseline quantization
 maximum = 2 ** 8 - 1
 bit_num = 8
-FirstEpoch = True
-Print_Feature = False
+FirstEpoch = False
+# Print_Feature = False
 X_round_regu = torch.zeros([1, 1], dtype=torch.float32)
 loss_MSE = 0.0
 RecordActivation = False
