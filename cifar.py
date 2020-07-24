@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 # Optimization options
-parser.add_argument('--epochs', default=50, type=int, metavar='N',
+parser.add_argument('--epochs', default=160, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -154,9 +154,10 @@ def main():
     # Train and val
     for epoch in range(start_epoch, args.epochs):
         resnet.RecordActivation = False
+        resnet.FirstEpoch = False
         if not args.fixbit:
             if epoch == start_epoch:
-                resnet.FirstEpoch = True
+                resnet.FirstEpoch = False
             else:
                 resnet.FirstEpoch = False
         else:
